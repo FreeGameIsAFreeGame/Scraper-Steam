@@ -5,11 +5,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\FreeGameIsAFreeGame.Core\FreeGameIsAFreeGame.Core\FreeGameIsAFreeGame.Core\FreeGameIsAFreeGame.Core.csproj" />
-    </ItemGroup>
-
-    <ItemGroup>
       <PackageReference Include="AngleSharp" Version="0.14.0" />
+      <PackageReference Include="FreeGameIsAFreeGame.Core" Version="1.0.0" />
       <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
       <PackageReference Include="NLog" Version="4.7.4" />
       <PackageReference Include="SteamKit2" Version="2.3.0" />
