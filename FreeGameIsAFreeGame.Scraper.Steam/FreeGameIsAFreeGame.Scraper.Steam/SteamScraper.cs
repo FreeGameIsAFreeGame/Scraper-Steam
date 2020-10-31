@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using AngleSharp;
 using AngleSharp.Dom;
-using AngleSharp.Html.Dom;
 using AngleSharp.Io;
 using FreeGameIsAFreeGame.Core;
 using FreeGameIsAFreeGame.Core.Models;
@@ -34,6 +33,8 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
         private string apiKey = "";
         private TaskCompletionSource<bool?> steamClientConnected = new TaskCompletionSource<bool?>(null);
         private bool handledLogin;
+        private bool handledDisconnect;
+        private List<IDisposable> disposables = new List<IDisposable>();
 
         private SteamClient client;
         private SteamApps apps;
@@ -49,17 +50,74 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             logger = LogManager.GetLogger(GetType().FullName);
         }
 
-        Task<IEnumerable<IDeal>> IScraper.Scrape(CancellationToken token)
+        async Task<IEnumerable<IDeal>> IScraper.Scrape(CancellationToken token)
         {
-            throw new System.NotImplementedException();
-        }
+            EnsureVariables();
 
-        private DateTimeOffset GetTimeFromRow(IHtmlTableRowElement row)
-        {
-            IElement italicElement = row.Cells[1].QuerySelector(".muted");
-            string text = italicElement.TextContent;
-            text = text.Replace("(", string.Empty).Replace(")", string.Empty);
-            return DateTimeOffset.FromUnixTimeSeconds(long.Parse(text));
+            if (client == null)
+            {
+                await ConnectToSteam(token);
+            }
+
+            var deals = new List<IDeal>();
+
+            if (lastScrapeStamp == null)
+                lastScrapeStamp = DateTimeOffset.Now.Subtract(TimeSpan.FromDays(7));
+
+            var currentScrapeStamp = DateTimeOffset.Now;
+
+            var appIds = await GetModifiedGames(token);
+            if (appIds == null)
+            {
+                logger.Warn("Null returned from GetModifiedGames");
+                return new List<IDeal>();
+            }
+
+            logger.Info("Found {count} modified games", appIds.Count);
+
+            var filteredAppIds = await FilterAppIds(appIds, token);
+
+            (Dictionary<uint, Deal> idToDeal, List<(uint, uint)> packages) packageData = await CreateBaseDeals(filteredAppIds);
+
+            foreach (var package in packageData.packages)
+            {
+                await Task.Delay(2000);
+
+                logger.Info($"Querying AppId: {package.Item1}; SubId: {package.Item2}");
+                AsyncJobMultiple<SteamApps.PICSProductInfoCallback>.ResultSet result =
+                    await apps.PICSGetProductInfo(package.Item1, package.Item2);
+                if (result.Failed || result.Results == null || result.Results.Count == 0)
+                    continue;
+
+                foreach (SteamApps.PICSProductInfoCallback callback in result.Results)
+                {
+                    if (!callback.Packages.TryGetValue(package.Item2, out var productInfo))
+                    {
+                        continue;
+                    }
+
+                    Deal deal = packageData.idToDeal[package.Item1];
+
+                    string? startTime = productInfo.KeyValues["extended"]["starttime"].Value;
+                    if (!string.IsNullOrEmpty(startTime))
+                    {
+                        deal.Start = DateTimeOffset.FromUnixTimeSeconds(long.Parse(startTime)).UtcDateTime;
+                    }
+
+                    string? expiryTime = productInfo.KeyValues["extended"]["expirytime"].Value;
+                    if (!string.IsNullOrEmpty(expiryTime))
+                    {
+                        deal.End = DateTimeOffset.FromUnixTimeSeconds(long.Parse(expiryTime)).UtcDateTime;
+                    }
+
+                    logger.Info("Found date info for deal, finalizing");
+                    deals.Add(deal);
+                    break;
+                }
+            }
+
+            lastScrapeStamp = currentScrapeStamp;
+            return deals;
         }
 
         private void EnsureVariables()
@@ -138,11 +196,12 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             return filteredAppIds;
         }
 
-        private async Task<(Dictionary<uint, Deal> idToDeal, List<uint> packages)> CreateBaseDeals(Dictionary<uint, int> filteredAppIds)
+        private async Task<(Dictionary<uint, Deal> idToDeal, List<(uint, uint)> packages)> CreateBaseDeals(
+            Dictionary<uint, int> filteredAppIds)
         {
             logger.Info("Creating base deal data");
             Dictionary<uint, Deal> idToDeal = new Dictionary<uint, Deal>();
-            List<uint> packages = new List<uint>();
+            List<(uint, uint)> packages = new List<(uint, uint)>();
 
             foreach (KeyValuePair<uint, int> filteredAppId in filteredAppIds)
             {
@@ -163,7 +222,7 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
                 };
 
                 idToDeal.Add(filteredAppId.Key, deal);
-                packages.AddRange(appDetails.Data.Packages.Select(x => (uint) x));
+                packages.AddRange(appDetails.Data.Packages.Select(x => (filteredAppId.Key, (uint) x)));
             }
 
             return (idToDeal, packages);
@@ -179,8 +238,12 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             return steamAppDetails;
         }
 
-        private async Task<bool> ConnectToSteam()
+        private async Task<bool> ConnectToSteam(CancellationToken token)
         {
+            handledLogin = false;
+            handledDisconnect = false;
+            disposables.Clear();
+
             logger.Info("Connecting to Steam");
             EnableSteamLogger();
 
@@ -194,14 +257,20 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
 
             client.Connect();
 
-            while (!handledLogin)
-            {
-                manager.RunWaitCallbacks(TimeSpan.FromSeconds(1));
-            }
+            Task.Run(RunSteam, token);
 
             bool? isConnected = await steamClientConnected.Task;
 
             return isConnected.HasValue && isConnected.Value;
+        }
+
+        private void RunSteam()
+        {
+            while (client != null)
+            {
+                logger.Debug("Steam Heartbeat");
+                manager.RunWaitCallbacks(TimeSpan.FromSeconds(10));
+            }
         }
 
         private void EnableSteamLogger()
@@ -226,9 +295,10 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
                 return;
 
             manager = new CallbackManager(client);
-            manager.Subscribe<SteamClient.ConnectedCallback>(OnConnected);
-            manager.Subscribe<SteamUser.LoggedOnCallback>(OnLoggedOn);
-            manager.Subscribe<SteamUser.LoggedOffCallback>(OnLoggedOff);
+            disposables.Add(manager.Subscribe<SteamClient.ConnectedCallback>(OnConnected));
+            disposables.Add(manager.Subscribe<SteamClient.DisconnectedCallback>(OnDisconnected));
+            disposables.Add(manager.Subscribe<SteamUser.LoggedOnCallback>(OnLoggedOn));
+            disposables.Add(manager.Subscribe<SteamUser.LoggedOffCallback>(OnLoggedOff));
         }
 
         private void OnLoggedOff(SteamUser.LoggedOffCallback obj)
@@ -243,6 +313,12 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
         {
             logger.Info("Client is connected, logging on as anonymous user");
             user.LogOnAnonymous();
+        }
+
+        private void OnDisconnected(SteamClient.DisconnectedCallback obj)
+        {
+            handledDisconnect = true;
+            logger.Info($"Client has been disconnected (user initiated: {obj.UserInitiated}");
         }
 
         private void OnLoggedOn(SteamUser.LoggedOnCallback obj)
