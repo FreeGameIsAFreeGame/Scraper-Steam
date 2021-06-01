@@ -3,19 +3,19 @@ using Newtonsoft.Json;
 
 namespace FreeGameIsAFreeGame.Scraper.Steam
 {
-    public partial class SteamModifiedGamesData
+    public class SteamModifiedGamesData
     {
         [JsonProperty("response")]
         public Response Response { get; set; }
     }
 
-    public partial class Response
+    public class Response
     {
         [JsonProperty("apps")]
         public List<App> Apps { get; set; }
     }
 
-    public partial class App
+    public class App
     {
         [JsonProperty("appid")]
         public long Appid { get; set; }

@@ -29,12 +29,11 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
         string IScraper.Identifier => "SteamFree";
         string IScraper.DisplayName => "Steam";
 
-        private DateTimeOffset? lastScrapeStamp = null;
         private string apiKey = "";
-        private TaskCompletionSource<bool?> steamClientConnected = new TaskCompletionSource<bool?>(null);
+        private readonly TaskCompletionSource<bool?> steamClientConnected = new TaskCompletionSource<bool?>(null);
         private bool handledLogin;
         private bool handledDisconnect;
-        private List<IDisposable> disposables = new List<IDisposable>();
+        private readonly List<IDisposable> disposables = new List<IDisposable>();
 
         private SteamClient client;
         private SteamApps apps;
@@ -53,20 +52,11 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
         async Task<IEnumerable<IDeal>> IScraper.Scrape(CancellationToken token)
         {
             EnsureVariables();
+            await ConnectToSteam(token);
 
-            if (client == null)
-            {
-                await ConnectToSteam(token);
-            }
+            List<IDeal> deals = new List<IDeal>();
 
-            var deals = new List<IDeal>();
-
-            if (lastScrapeStamp == null)
-                lastScrapeStamp = DateTimeOffset.Now.Subtract(TimeSpan.FromDays(7));
-
-            var currentScrapeStamp = DateTimeOffset.Now;
-
-            var appIds = await GetModifiedGames(token);
+            List<long> appIds = await GetModifiedGames(token);
             if (appIds == null)
             {
                 logger.Warn("Null returned from GetModifiedGames");
@@ -75,28 +65,28 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
 
             logger.Info("Found {count} modified games", appIds.Count);
 
-            var filteredAppIds = await FilterAppIds(appIds, token);
+            Dictionary<uint, int> filteredAppIds = await FilterAppIds(appIds, token);
 
-            (Dictionary<uint, Deal> idToDeal, List<(uint, uint)> packages) packageData = await CreateBaseDeals(filteredAppIds);
+            BaseDeals packageData = await CreateBaseDeals(filteredAppIds);
 
-            foreach (var package in packageData.packages)
+            foreach (PackageKeys package in packageData.Packages)
             {
-                await Task.Delay(2000);
+                await Task.Delay(2000, token);
 
-                logger.Info($"Querying AppId: {package.Item1}; SubId: {package.Item2}");
+                logger.Info($"Querying AppId: {package.FilteredAppId}; SubId: {package.PackageId}");
                 AsyncJobMultiple<SteamApps.PICSProductInfoCallback>.ResultSet result =
-                    await apps.PICSGetProductInfo(package.Item1, package.Item2);
+                    await apps.PICSGetProductInfo(package.FilteredAppId, package.PackageId);
                 if (result.Failed || result.Results == null || result.Results.Count == 0)
                     continue;
 
                 foreach (SteamApps.PICSProductInfoCallback callback in result.Results)
                 {
-                    if (!callback.Packages.TryGetValue(package.Item2, out var productInfo))
+                    if (!callback.Packages.TryGetValue(package.PackageId, out SteamApps.PICSProductInfoCallback.PICSProductInfo productInfo))
                     {
                         continue;
                     }
 
-                    Deal deal = packageData.idToDeal[package.Item1];
+                    Deal deal = packageData.IdToDeal[package.FilteredAppId];
 
                     string? startTime = productInfo.KeyValues["extended"]["starttime"].Value;
                     if (!string.IsNullOrEmpty(startTime))
@@ -109,14 +99,18 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
                     {
                         deal.End = DateTimeOffset.FromUnixTimeSeconds(long.Parse(expiryTime)).UtcDateTime;
                     }
+                    else
+                    {
+                        logger.Info("We're ignoring deals without end date for now");
+                        continue;
+                    }
 
                     logger.Info("Found date info for deal, finalizing");
                     deals.Add(deal);
                     break;
                 }
             }
-
-            lastScrapeStamp = currentScrapeStamp;
+            
             return deals;
         }
 
@@ -131,12 +125,13 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
 
         private async Task<List<long>> GetModifiedGames(CancellationToken token)
         {
+            DateTimeOffset lastScrapeStamp = DateTimeOffset.Now.Subtract(TimeSpan.FromDays(1));
             logger.Info("Getting modified games since {time}", lastScrapeStamp);
-            long epoch = lastScrapeStamp.Value.ToUnixTimeSeconds();
+            long epoch = lastScrapeStamp.ToUnixTimeSeconds();
             Url url = Url.Create(
                 $"https://api.steampowered.com/IStoreService/GetAppList/v1/?key={apiKey}&if_modified_since={epoch}&include_games=1");
             DocumentRequest request = DocumentRequest.Get(url);
-            IDocument response = await context.OpenAsync(request, cancel: token);
+            IDocument response = await context.OpenAsync(request, token);
             if (response.StatusCode != HttpStatusCode.OK)
                 return null;
 
@@ -196,12 +191,11 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             return filteredAppIds;
         }
 
-        private async Task<(Dictionary<uint, Deal> idToDeal, List<(uint, uint)> packages)> CreateBaseDeals(
-            Dictionary<uint, int> filteredAppIds)
+        private async Task<BaseDeals> CreateBaseDeals(Dictionary<uint, int> filteredAppIds)
         {
             logger.Info("Creating base deal data");
             Dictionary<uint, Deal> idToDeal = new Dictionary<uint, Deal>();
-            List<(uint, uint)> packages = new List<(uint, uint)>();
+            List<PackageKeys> packages = new List<PackageKeys>();
 
             foreach (KeyValuePair<uint, int> filteredAppId in filteredAppIds)
             {
@@ -213,7 +207,7 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
                 if (!appDetails.Success)
                     continue;
 
-                Deal deal = new Deal()
+                Deal deal = new Deal
                 {
                     Discount = filteredAppId.Value,
                     Image = appDetails.Data.HeaderImage,
@@ -222,10 +216,36 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
                 };
 
                 idToDeal.Add(filteredAppId.Key, deal);
-                packages.AddRange(appDetails.Data.Packages.Select(x => (filteredAppId.Key, (uint) x)));
+                packages.AddRange(
+                    appDetails.Data.Packages.Select(
+                        packageId => new PackageKeys((uint) packageId, filteredAppId.Key)));
             }
 
-            return (idToDeal, packages);
+            return new BaseDeals(idToDeal, packages);
+        }
+
+        private class BaseDeals
+        {
+            public BaseDeals(Dictionary<uint, Deal> idToDeal, List<PackageKeys> packages)
+            {
+                IdToDeal = idToDeal;
+                Packages = packages;
+            }
+
+            public Dictionary<uint, Deal> IdToDeal { get; }
+            public List<PackageKeys> Packages { get; }
+        }
+
+        private class PackageKeys
+        {
+            public PackageKeys(uint packageId, uint filteredAppId)
+            {
+                PackageId = packageId;
+                FilteredAppId = filteredAppId;
+            }
+
+            public uint PackageId { get; }
+            public uint FilteredAppId { get; } 
         }
 
         private async Task<Dictionary<string, SteamAppDetails>> GetAppDetails(uint appId)
@@ -335,5 +355,25 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             logger.Info("Successfully logged in");
             steamClientConnected.SetResult(true);
         }
+
+#region IDisposable
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            context?.Dispose();
+            
+            client?.Disconnect();
+            
+            foreach (IDisposable disposable in disposables)
+            {
+                disposable?.Dispose();
+            }
+
+            client = null;
+            apps = null;
+            user = null;
+            manager = null;
+        }
+#endregion
     }
 }
