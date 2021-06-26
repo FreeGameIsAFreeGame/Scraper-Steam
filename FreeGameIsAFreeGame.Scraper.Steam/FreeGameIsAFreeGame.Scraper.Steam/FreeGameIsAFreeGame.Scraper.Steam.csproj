@@ -2,13 +2,20 @@
 
     <PropertyGroup>
         <TargetFramework>netcoreapp3.1</TargetFramework>
+        <Title>Free Game Is A Free Game - Steam Scraper</Title>
+        <Authors>Thundernerd</Authors>
+        <Copyright>FreeGameIsAFreeGame</Copyright>
+        <PackageProjectUrl>https://github.com/FreeGameIsAFreeGame/Scraper-Steam</PackageProjectUrl>
+        <PackageLicenseUrl>https://github.com/FreeGameIsAFreeGame/Scraper-Steam/blob/master/LICENSE</PackageLicenseUrl>
+        <RepositoryUrl>https://github.com/FreeGameIsAFreeGame/Scraper-Steam</RepositoryUrl>
+        <PackageVersion>2.1.1</PackageVersion>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="AngleSharp" Version="0.14.0" />
-      <PackageReference Include="FreeGameIsAFreeGame.Core" Version="1.0.0" />
-      <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
-      <PackageReference Include="NLog" Version="4.7.4" />
+      <PackageReference Include="AngleSharp" Version="0.16.0" />
+      <PackageReference Include="FreeGameIsAFreeGame.Core" Version="7.2.1" />
+      <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+      <PackageReference Include="NLog" Version="4.7.10" />
       <PackageReference Include="SteamKit2" Version="2.3.0" />
     </ItemGroup>
 

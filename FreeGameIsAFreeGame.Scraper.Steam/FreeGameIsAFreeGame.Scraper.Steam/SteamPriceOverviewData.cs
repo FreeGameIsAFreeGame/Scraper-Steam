@@ -17,12 +17,12 @@ namespace FreeGameIsAFreeGame.Scraper.Steam.Overview
         public DataUnion? Data { get; set; }
     }
 
-    public partial class DataClass
+    public class DataClass
     {
         [J("price_overview")] public PriceOverview PriceOverview { get; set; }
     }
 
-    public partial class PriceOverview
+    public class PriceOverview
     {
         [J("currency")] public string Currency { get; set; }
         [J("initial")] public long Initial { get; set; }
@@ -32,28 +32,37 @@ namespace FreeGameIsAFreeGame.Scraper.Steam.Overview
         [J("final_formatted")] public string FinalFormatted { get; set; }
     }
 
-    public partial struct DataUnion
+    public struct DataUnion
     {
         public List<object> AnythingArray;
         public DataClass DataClass;
 
-        public static implicit operator DataUnion(List<object> AnythingArray) =>
-            new DataUnion {AnythingArray = AnythingArray};
+        public static implicit operator DataUnion(List<object> AnythingArray)
+        {
+            return new DataUnion {AnythingArray = AnythingArray};
+        }
 
-        public static implicit operator DataUnion(DataClass DataClass) => new DataUnion {DataClass = DataClass};
+        public static implicit operator DataUnion(DataClass DataClass)
+        {
+            return new DataUnion {DataClass = DataClass};
+        }
     }
 
     public partial class SteamPriceOverviewData
     {
-        public static Dictionary<string, SteamPriceOverviewData> FromJson(string json) =>
-            JsonConvert.DeserializeObject<Dictionary<string, SteamPriceOverviewData>>(json,
+        public static Dictionary<string, SteamPriceOverviewData> FromJson(string json)
+        {
+            return JsonConvert.DeserializeObject<Dictionary<string, SteamPriceOverviewData>>(json,
                 Converter.Settings);
+        }
     }
 
     public static class Serialize
     {
-        public static string ToJson(this Dictionary<string, SteamPriceOverviewData> self) =>
-            JsonConvert.SerializeObject((object?) self, (JsonSerializerSettings) Converter.Settings);
+        public static string ToJson(this Dictionary<string, SteamPriceOverviewData> self)
+        {
+            return JsonConvert.SerializeObject(self, Converter.Settings);
+        }
     }
 
     internal static class Converter
@@ -66,13 +75,16 @@ namespace FreeGameIsAFreeGame.Scraper.Steam.Overview
             {
                 DataUnionConverter.Singleton,
                 new IsoDateTimeConverter {DateTimeStyles = DateTimeStyles.AssumeUniversal}
-            },
+            }
         };
     }
 
     internal class DataUnionConverter : JsonConverter
     {
-        public override bool CanConvert(Type t) => t == typeof(DataUnion) || t == typeof(DataUnion?);
+        public override bool CanConvert(Type t)
+        {
+            return t == typeof(DataUnion) || t == typeof(DataUnion?);
+        }
 
         public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)
         {
