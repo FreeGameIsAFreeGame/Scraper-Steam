@@ -23,11 +23,10 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
     {
         private readonly string ENV_KEY = "STEAM_API_KEY";
 
-        private readonly IBrowsingContext context;
-        private readonly ILogger logger;
+        private IBrowsingContext context;
+        private ILogger logger;
 
         string IScraper.Identifier => "SteamFree";
-        string IScraper.DisplayName => "Steam";
 
         private string apiKey = "";
         private readonly TaskCompletionSource<bool?> steamClientConnected = new TaskCompletionSource<bool?>(null);
@@ -40,20 +39,23 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
         private SteamUser user;
         private CallbackManager manager;
 
-        public SteamScraper()
+        /// <inheritdoc />
+        public async Task Initialize(CancellationToken token)
         {
             context = BrowsingContext.New(Configuration.Default
                 .WithDefaultLoader()
                 .WithDefaultCookies());
 
             logger = LogManager.GetLogger(GetType().FullName);
+            
+            EnsureVariables();
+            await ConnectToSteam(token);
+
+            token.ThrowIfCancellationRequested();
         }
 
         async Task<IEnumerable<IDeal>> IScraper.Scrape(CancellationToken token)
         {
-            EnsureVariables();
-            await ConnectToSteam(token);
-
             List<IDeal> deals = new List<IDeal>();
 
             List<long> appIds = await GetModifiedGames(token);
@@ -110,7 +112,7 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
                     break;
                 }
             }
-            
+
             return deals;
         }
 
@@ -245,7 +247,7 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             }
 
             public uint PackageId { get; }
-            public uint FilteredAppId { get; } 
+            public uint FilteredAppId { get; }
         }
 
         private async Task<Dictionary<string, SteamAppDetails>> GetAppDetails(uint appId)
@@ -356,14 +358,13 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             steamClientConnected.SetResult(true);
         }
 
-#region IDisposable
         /// <inheritdoc />
-        public void Dispose()
+        public Task Dispose()
         {
             context?.Dispose();
-            
+
             client?.Disconnect();
-            
+
             foreach (IDisposable disposable in disposables)
             {
                 disposable?.Dispose();
@@ -373,7 +374,8 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             apps = null;
             user = null;
             manager = null;
+
+            return Task.CompletedTask;
         }
-#endregion
     }
 }
