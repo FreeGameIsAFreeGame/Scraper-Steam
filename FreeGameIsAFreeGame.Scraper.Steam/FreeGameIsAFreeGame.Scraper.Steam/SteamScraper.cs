@@ -19,7 +19,7 @@ using PriceOverview = FreeGameIsAFreeGame.Scraper.Steam.Overview.PriceOverview;
 
 namespace FreeGameIsAFreeGame.Scraper.Steam
 {
-    public class SteamScraper : IScraper
+    public partial class SteamScraper : IScraper
     {
         private readonly string ENV_KEY = "STEAM_API_KEY";
 
@@ -47,7 +47,7 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
                 .WithDefaultCookies());
 
             logger = LogManager.GetLogger(GetType().FullName);
-            
+
             EnsureVariables();
             await ConnectToSteam(token);
 
@@ -224,30 +224,6 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
             }
 
             return new BaseDeals(idToDeal, packages);
-        }
-
-        private class BaseDeals
-        {
-            public BaseDeals(Dictionary<uint, Deal> idToDeal, List<PackageKeys> packages)
-            {
-                IdToDeal = idToDeal;
-                Packages = packages;
-            }
-
-            public Dictionary<uint, Deal> IdToDeal { get; }
-            public List<PackageKeys> Packages { get; }
-        }
-
-        private class PackageKeys
-        {
-            public PackageKeys(uint packageId, uint filteredAppId)
-            {
-                PackageId = packageId;
-                FilteredAppId = filteredAppId;
-            }
-
-            public uint PackageId { get; }
-            public uint FilteredAppId { get; }
         }
 
         private async Task<Dictionary<string, SteamAppDetails>> GetAppDetails(uint appId)
