@@ -1,0 +1,29 @@
+name: Pack and Publish to GitHub Packages
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  PROJ_DIR: FreeGameIsAFreeGame.Scraper.Steam
+  PACK_CONFIGURATION: Release
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        path: repo
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: 5.0.x
+    - name: Pack
+      run: dotnet pack repo/${{env.PROJ_DIR}} -c ${{env.PACK_CONFIGURATION}} --output nupkgs
+    - name: Add source
+      run: dotnet nuget add source --username FreeGameIsAFreeGame --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/FreeGameIsAFreeGame/index.json"
+    - name: Push package
+      run: dotnet nuget push nupkgs/*.nupkg --api-key ${{secrets.PAT}} --source "github"
