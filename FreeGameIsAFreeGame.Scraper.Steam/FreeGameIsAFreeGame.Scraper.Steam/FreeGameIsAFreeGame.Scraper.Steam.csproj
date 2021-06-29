@@ -8,7 +8,7 @@
         <PackageProjectUrl>https://github.com/FreeGameIsAFreeGame/Scraper-Steam</PackageProjectUrl>
         <PackageLicenseUrl>https://github.com/FreeGameIsAFreeGame/Scraper-Steam/blob/master/LICENSE</PackageLicenseUrl>
         <RepositoryUrl>https://github.com/FreeGameIsAFreeGame/Scraper-Steam</RepositoryUrl>
-        <PackageVersion>2.1.1</PackageVersion>
+        <PackageVersion>2.1.2</PackageVersion>
     </PropertyGroup>
 
     <ItemGroup>
