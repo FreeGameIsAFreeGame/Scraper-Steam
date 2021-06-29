@@ -337,8 +337,9 @@ namespace FreeGameIsAFreeGame.Scraper.Steam
         /// <inheritdoc />
         public Task Dispose()
         {
+            DebugLog.RemoveListener(SteamLogCallback);
+            
             context?.Dispose();
-
             client?.Disconnect();
 
             foreach (IDisposable disposable in disposables)
